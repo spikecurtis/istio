@@ -55,6 +55,7 @@ func Compare(content, golden []byte) error {
 
 // CompareYAML compares a file "x" against a golden file "x.golden"
 func CompareYAML(filename string, t *testing.T) {
+	t.Helper()
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -78,6 +79,7 @@ func CompareYAML(filename string, t *testing.T) {
 
 // CompareContent compares the content value against the golden file
 func CompareContent(content []byte, goldenFile string, t *testing.T) {
+	t.Helper()
 	if Refresh() {
 		t.Logf("Refreshing golden file %s", goldenFile)
 		if err := ioutil.WriteFile(goldenFile, content, 0644); err != nil {

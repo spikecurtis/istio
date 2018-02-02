@@ -30,9 +30,7 @@ import (
 )
 
 func buildIngressListeners(mesh *meshconfig.MeshConfig, instances []*model.ServiceInstance, discovery model.ServiceDiscovery,
-	config model.IstioConfigStore,
-	ingress model.Node) Listeners {
-
+	config model.IstioConfigStore, ingress model.Node) Listeners {
 	opts := buildHTTPListenerOpts{
 		mesh:             mesh,
 		node:             ingress,

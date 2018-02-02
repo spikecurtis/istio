@@ -239,6 +239,8 @@ type IstioConfigStore interface {
 	// the request.
 	RouteRules(source []*ServiceInstance, destination string, domain string) []Config
 
+	RouteRulesV2(destination string, domain string) []Config
+
 	// RouteRulesByDestination selects routing rules associated with destination
 	// service instances.  A rule must match at least one of the input
 	// destination instances.
@@ -550,6 +552,10 @@ func (store *istioConfigStore) routeRules(instances []*ServiceInstance, destinat
 	}
 
 	return out
+}
+
+func (store *istioConfigStore) RouteRulesV2(domain, destination string) []Config {
+	return store.routeRulesV2(domain, destination)
 }
 
 func (store *istioConfigStore) routeRulesV2(domain, destination string) []Config {

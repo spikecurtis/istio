@@ -134,23 +134,38 @@ func BuildConfig(config meshconfig.ProxyConfig, pilotSAN []string) *Config {
 
 // buildListeners produces a list of listeners and referenced clusters for all proxies
 func buildListeners(env model.Environment, node model.Node) (Listeners, error) {
+	var listeners Listeners
+
 	switch node.Type {
-	case model.Sidecar, model.Router:
+	case model.Sidecar:
 		instances, err := env.GetSidecarServiceInstances(map[string]*model.Node{node.IPAddress: &node})
 		if err != nil {
 			return nil, err
 		}
+
 		services, err := env.Services()
 		if err != nil {
 			return nil, err
 		}
-		listeners, _ := buildSidecarListenersClusters(env.Mesh, instances,
-			services, env.ManagementPorts(node.IPAddress), node, env.IstioConfigStore)
-		return listeners, nil
+
+		listeners, _ = buildSidecarListenersClusters(env.Mesh, instances, services, env.ManagementPorts(node.IPAddress), node, env.IstioConfigStore)
+	case model.Router:
+		instancesOnThisNode, err := env.GetSidecarServiceInstances(map[string]*model.Node{node.IPAddress: &node})
+		if err != nil {
+			return nil, err
+		}
+
+		allServicesInTheMesh, err := env.Services()
+		if err != nil {
+			return nil, err
+		}
+
+		listeners = buildGatewayListeners(env.Mesh, instancesOnThisNode, allServicesInTheMesh, env.IstioConfigStore, node)
 	case model.Ingress:
-		return buildIngressListeners(env.Mesh, nil, env.ServiceDiscovery, env.IstioConfigStore, node), nil
+		listeners = buildIngressListeners(env.Mesh, nil, env.ServiceDiscovery, env.IstioConfigStore, node)
 	}
-	return nil, nil
+
+	return listeners, nil
 }
 
 func buildClusters(env model.Environment, node model.Node) (Clusters, error) {
@@ -352,7 +367,6 @@ type buildHTTPListenerOpts struct {
 // Set RDS parameter to a non-empty value to enable RDS for the matching route name.
 func buildHTTPListener(opts buildHTTPListenerOpts) *Listener {
 	filters := buildFaultFilters(opts.routeConfig)
-
 	filters = append(filters, HTTPFilter{
 		Type:   decoder,
 		Name:   router,
@@ -565,12 +579,30 @@ func buildOutboundListeners(mesh *meshconfig.MeshConfig, sidecar model.Node, ins
 
 type buildClusterFunc func(hostname string, port *model.Port, labels model.Labels, isExternal bool) *Cluster
 
-// buildDestinationHTTPRoutes creates HTTP route for a service and a port from rules
 func buildDestinationHTTPRoutes(sidecar model.Node, service *model.Service,
 	servicePort *model.Port,
 	instances []*model.ServiceInstance,
 	config model.IstioConfigStore,
 	buildCluster buildClusterFunc,
+) []*HTTPRoute {
+	return buildDestinationHTTPRoutesWithGateways(
+		sidecar,
+		service,
+		servicePort,
+		instances,
+		config,
+		buildCluster,
+		nil,
+	)
+}
+
+// buildDestinationHTTPRoutes creates HTTP route for a service and a port from rules
+func buildDestinationHTTPRoutesWithGateways(node model.Node, service *model.Service,
+	servicePort *model.Port,
+	instances []*model.ServiceInstance,
+	config model.IstioConfigStore,
+	buildCluster buildClusterFunc,
+	targetGateways map[string]bool,
 ) []*HTTPRoute {
 	protocol := servicePort.Protocol
 	switch protocol {
@@ -579,14 +611,30 @@ func buildDestinationHTTPRoutes(sidecar model.Node, service *model.Service,
 
 		// collect route rules
 		useDefaultRoute := true
-		rules := config.RouteRules(instances, service.Hostname, sidecar.Domain)
+		var rules []model.Config
+
+		if targetGateways != nil {
+			allRules := config.RouteRulesV2(node.Domain, service.Hostname)
+			for _, untypedRule := range allRules {
+				rule := untypedRule.Spec.(*routingv2.RouteRule)
+				for _, gw := range rule.Gateways {
+					if targetGateways[gw] {
+						rules = append(rules, untypedRule)
+					}
+				}
+
+			}
+		} else {
+			rules = config.RouteRules(instances, service.Hostname, node.Domain)
+		}
+
 		// sort for output uniqueness
 		// if v1alpha2 rules are returned, len(rules) <= 1 is guaranteed
 		// because v1alpha2 rules are unique per host.
 		model.SortRouteRules(rules)
 
 		for _, rule := range rules {
-			httpRoutes := buildHTTPRoutes(config, rule, service, servicePort, instances, sidecar.Domain, buildCluster)
+			httpRoutes := buildHTTPRoutes(config, rule, service, servicePort, instances, node.Domain, buildCluster)
 			routes = append(routes, httpRoutes...)
 
 			// User can provide timeout/retry policies without any match condition,

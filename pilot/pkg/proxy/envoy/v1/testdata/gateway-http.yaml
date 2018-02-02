@@ -1,0 +1,6 @@
+servers:
+- port:
+    number: 80
+    protocol: http
+  hosts:
+  - example.com

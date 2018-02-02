@@ -1,0 +1,17 @@
+servers:
+- port:
+    number: 80
+    protocol: http
+  hosts:
+  - example.com
+  tls:
+    httpsRedirect: true
+- port:
+    number: 443
+    protocol: https
+  hosts:
+  - example.com
+  tls:
+    mode: SIMPLE
+    serverCertificate: /etc/certs/server.pem
+    privateKey: /etc/certs/key.pem
