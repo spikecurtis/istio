@@ -15,7 +15,6 @@
 package v1
 
 import (
-	"fmt"
 	"strings"
 
 	meshconfig "istio.io/api/mesh/v1alpha1"
@@ -43,6 +42,7 @@ func buildGatewayListeners(mesh *meshconfig.MeshConfig,
 		targetGateways[spec.Name] = true
 	}
 
+	// TODO: is this still right??
 	gateway := gateways[0].Spec.(*routing.Gateway)
 	for _, spec := range gateways[1:] {
 		model.MergeGateways(gateway, spec.Spec.(*routing.Gateway))
@@ -51,15 +51,14 @@ func buildGatewayListeners(mesh *meshconfig.MeshConfig,
 	listeners := make(Listeners, 0, len(gateway.Servers))
 	for _, server := range gateway.Servers {
 		// TODO: TCP
-		virtualListeners := buildVirtualHTTPGatewayListeners(mesh, node, instancesOnThisNode, allServicesInTheMesh, config, targetGateways)
 
 		// build physical listener
 		physicalListener := buildPhysicalGatewayListener(mesh, node, instancesOnThisNode, allServicesInTheMesh, config, server)
 		if physicalListener == nil {
 			continue // TODO: add support for all protocols
 		}
+
 		listeners = append(listeners, physicalListener)
-		listeners = append(listeners, virtualListeners...)
 	}
 
 	return listeners.normalize()
@@ -111,36 +110,6 @@ func buildPhysicalGatewayListener(
 		log.Warnf("Gateway with invalid protocol: %q; %v", server.Port.Protocol, server)
 		return nil
 	}
-}
-
-func buildVirtualHTTPGatewayListeners(
-	mesh *meshconfig.MeshConfig,
-	node model.Node,
-	instancesOnThisNode []*model.ServiceInstance,
-	allServicesInTheMesh []*model.Service,
-	config model.IstioConfigStore,
-	targetGateways map[string]bool) Listeners {
-
-	listeners := make(Listeners, 0)
-	// buid virtual listeners
-	httpOutbound := buildGatewayHTTPRoutes(mesh, node, instancesOnThisNode, allServicesInTheMesh, config, targetGateways)
-	for port, routeConfig := range httpOutbound {
-		listeners = append(listeners, buildHTTPListener(buildHTTPListenerOpts{
-			mesh:             mesh,
-			node:             node,
-			instances:        instancesOnThisNode,
-			routeConfig:      routeConfig,
-			ip:               WildcardAddress,
-			port:             port,
-			rds:              fmt.Sprintf("%d", port),
-			useRemoteAddress: true,
-			direction:        IngressTraceOperation, //TODO: not always right? gateways inside the mesh
-			outboundListener: true,
-			store:            config,
-		}))
-	}
-
-	return listeners
 }
 
 // TODO: this isn't really correct: we need xDS v2 APIs to really configure this correctly.

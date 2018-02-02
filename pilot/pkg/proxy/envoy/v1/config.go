@@ -317,7 +317,7 @@ func buildRDSRoute(mesh *meshconfig.MeshConfig, node model.Node, routeName strin
 	switch node.Type {
 	case model.Ingress:
 		httpConfigs, _ = buildIngressRoutes(mesh, node, nil, discovery, config)
-	case model.Sidecar, model.Router:
+	case model.Sidecar:
 		instances, err := discovery.GetSidecarServiceInstances(map[string]*model.Node{node.IPAddress: &node})
 		if err != nil {
 			return nil, err
@@ -329,6 +329,26 @@ func buildRDSRoute(mesh *meshconfig.MeshConfig, node model.Node, routeName strin
 		httpConfigs = buildOutboundHTTPRoutes(mesh, node, instances, services, config)
 		httpConfigs = buildEgressHTTPRoutes(mesh, node, instances, config, httpConfigs)
 		httpConfigs = buildExternalServiceHTTPRoutes(mesh, node, instances, config, httpConfigs)
+	case model.Router:
+		instances, err := discovery.GetSidecarServiceInstances(map[string]*model.Node{node.IPAddress: &node})
+		if err != nil {
+			return nil, err
+		}
+		services, err := discovery.Services()
+		if err != nil {
+			return nil, err
+		}
+
+		gateways, err := config.List(model.Gateway.Type, model.NamespaceAll)
+		if err != nil {
+			return nil, err
+		}
+		targetGateways := map[string]bool{}
+		for _, spec := range gateways {
+			targetGateways[spec.Name] = true
+		}
+
+		httpConfigs = buildGatewayHTTPRoutes(mesh, node, instances, services, config, targetGateways)
 	default:
 		return nil, errors.New("unrecognized node type")
 	}

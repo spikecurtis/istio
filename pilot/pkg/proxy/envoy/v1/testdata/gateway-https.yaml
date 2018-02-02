@@ -1,14 +1,16 @@
 servers:
 - port:
-    number: 80
+    number: 8080
     protocol: http
+    name: public-http
   hosts:
   - example.com
   tls:
     httpsRedirect: true
 - port:
-    number: 443
+    number: 8443
     protocol: https
+    name: public-https
   hosts:
   - example.com
   tls:

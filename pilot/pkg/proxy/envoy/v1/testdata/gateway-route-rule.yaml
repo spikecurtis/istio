@@ -1,0 +1,13 @@
+hosts:
+- example.com
+gateways:
+- some-gateway
+http:
+- match:
+  - uri:
+      prefix: /magic/
+  route:
+  - destination:
+      port:
+        number: 81
+      name: hello

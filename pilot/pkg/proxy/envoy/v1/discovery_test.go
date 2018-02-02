@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	restful "github.com/emicklei/go-restful"
+	"github.com/onsi/gomega"
 
 	meshconfig "istio.io/api/mesh/v1alpha1"
 	"istio.io/istio/pilot/pkg/config/memory"
@@ -949,20 +950,32 @@ func TestListenerDiscoveryRouterError(t *testing.T) {
 	}
 }
 
-func TestListenerDiscoveryRouter(t *testing.T) {
+func TestListenerDiscoveryGateway(t *testing.T) {
+	g := gomega.NewGomegaWithT(t)
+
+	gateway := fileConfig{
+		meta: model.ConfigMeta{Type: model.Gateway.Type, Name: "some-gateway"},
+		file: "testdata/gateway-https.yaml",
+	}
+
+	routeRule := fileConfig{
+		meta: model.ConfigMeta{Type: model.V1alpha2RouteRule.Type, Name: "gateway-rule"},
+		file: "testdata/gateway-route-rule.yaml",
+	}
+
 	mesh := makeMeshConfig()
 	registry := memory.Make(model.IstioConfigTypes)
 	ds := makeDiscoveryService(t, registry, &mesh)
-	addConfig(registry, egressRule, t)
+	addConfig(registry, gateway, t)
+	addConfig(registry, routeRule, t)
 
 	url := fmt.Sprintf("/v1/listeners/%s/%s", "istio-proxy", mock.Router.ServiceNode())
 	response := makeDiscoveryRequest(ds, "GET", url, t)
-	compareResponse(response, "testdata/lds-router.json", t)
 
-	mesh.AuthPolicy = meshconfig.MeshConfig_MUTUAL_TLS
-	ds = makeDiscoveryService(t, registry, &mesh)
-	response = makeDiscoveryRequest(ds, "GET", url, t)
-	compareResponse(response, "testdata/lds-router-auth.json", t)
+	contents, err := ioutil.ReadFile("testdata/gateway-lds.json.golden")
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	g.Expect(response).To(gomega.MatchJSON(contents))
 }
 
 func TestDiscoveryCache(t *testing.T) {
