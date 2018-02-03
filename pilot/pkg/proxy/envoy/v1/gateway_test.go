@@ -62,7 +62,7 @@ func TestBuildGatewayListeners(t *testing.T) {
 		//{"h2", []fileConfig{h2Gateway}, "testdata/gateway-h2-listener.json.golden"},
 		{"http and h2", []fileConfig{httpGateway, h2Gateway}, "testdata/gateway-h2-listener.json.golden"},
 		//{"http and https", []fileConfig{httpGateway, httpsGateway}, "testdata/gateway-h2-listener.json.golden"},
-		{"https and h2", []fileConfig{httpsGateway, h2Gateway}, "testdata/gateway-h2-listener.json.golden"},
+		{"https and h2", []fileConfig{httpsGateway, h2Gateway}, "testdata/gateway-https-h2-listener.json.golden"},
 		//{"http, https, h2", []fileConfig{httpGateway, httpsGateway, h2Gateway}, "testdata/gateway-h2-listener.json.golden"},
 	}
 
