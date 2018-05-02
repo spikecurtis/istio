@@ -24,12 +24,18 @@ package model
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"net"
+	"path"
 	"sort"
 	"strings"
 
+	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
+
 	authn "istio.io/api/authentication/v1alpha1"
 	meshconfig "istio.io/api/mesh/v1alpha1"
+	"istio.io/istio/pilot/pkg/networking/util"
 )
 
 // Hostname describes a (possibly wildcarded) hostname
@@ -151,6 +157,28 @@ const (
 	ProtocolUnsupported Protocol = "UnsupportedProtocol"
 )
 
+// AddressFamily indicates the kind of transport used to reach a NetworkEndpoint
+type AddressFamily int
+
+const (
+	// AddressFamilyTCP represents an address that connects to a TCP endpoint. It consists of an IP address or host and
+	// a port number.
+	AddressFamilyTCP AddressFamily = iota
+	// AddressFamilyUnix represents an address that connects to a Unix Domain Socket. It consists of a socket file path.
+	AddressFamilyUnix
+)
+
+func (f AddressFamily) String() string {
+	switch f {
+	case AddressFamilyTCP:
+		return "tcp"
+	case AddressFamilyUnix:
+		return "unix"
+	default:
+		return fmt.Sprintf("%d", f)
+	}
+}
+
 // TrafficDirection defines whether traffic exists a service instance or enters a service instance
 type TrafficDirection string
 
@@ -233,12 +261,18 @@ func (p Protocol) IsTCP() bool {
 //  --> 172.16.0.1:54546 (with ServicePort pointing to 80) and
 //  --> 172.16.0.1:33333 (with ServicePort pointing to 8080)
 type NetworkEndpoint struct {
-	// Address of the network endpoint, typically an IPv4 address
+	// Family indicates what type of endpoint, such as TCP or Unix Domain Socket.
+	Family AddressFamily
+
+	// Address of the network endpoint. If Family is `AddressFamilyTCP`, it is
+	// typically an IPv4 address. If Family is `AddressFamilyUnix`, it is the
+	// path to the domain socket.
 	Address string
 
 	// Port number where this instance is listening for connections This
 	// need not be the same as the port where the service is accessed.
 	// e.g., catalog.mystore.com:8080 -> 172.16.0.1:55446
+	// Ignored for `AddressFamilyUnix`.
 	Port int
 
 	// Port declaration from the service declaration This is the port for
@@ -671,4 +705,38 @@ func (s Service) GetServiceAddressForProxy(node *Proxy) string {
 		return s.Addresses[node.ClusterID]
 	}
 	return s.Address
+}
+
+// GetAddress returns an Envoy v2 API `Address` that represents this NetworkEndpoint
+func (n *NetworkEndpoint) GetAddress() core.Address {
+	switch n.Family {
+	case AddressFamilyTCP:
+		return util.BuildAddress(n.Address, uint32(n.Port))
+	case AddressFamilyUnix:
+		return util.BuildPipeAddress(n.Address)
+	default:
+		panic(fmt.Sprintf("unhandled Family %v", n.Family))
+	}
+}
+
+// ValidateAddress checks the Address field of a NetworkEndpoint. If the family is TCP, it checks the address is a valid
+// IP address. If the family is Unix, it checks the address is a valid socket file path.
+func (n *NetworkEndpoint) ValidateAddress() error {
+	switch n.Family {
+	case AddressFamilyTCP:
+		ipAddr := net.ParseIP(n.Address)
+		if ipAddr == nil {
+			return errors.New("invalid IP address " + n.Address)
+		}
+	case AddressFamilyUnix:
+		if len(n.Address) == 0 {
+			return errors.New("unix address must not be empty")
+		}
+		if !path.IsAbs(n.Address) {
+			return errors.New("unix address must be absolute path: " + n.Address)
+		}
+	default:
+		panic(fmt.Sprintf("unhandled Family %v", n.Family))
+	}
+	return nil
 }

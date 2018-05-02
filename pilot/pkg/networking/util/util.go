@@ -101,6 +101,11 @@ func BuildAddress(ip string, port uint32) core.Address {
 	}
 }
 
+// BuildPipeAddress returns a Pipe address with the given path.
+func BuildPipeAddress(path string) core.Address {
+	return core.Address{Address: &core.Address_Pipe{Pipe: &core.Pipe{Path: path}}}
+}
+
 // GetByAddress returns a listener by its address
 // TODO(mostrowski): consider passing map around to save iteration.
 func GetByAddress(listeners []*xdsapi.Listener, addr string) *xdsapi.Listener {
