@@ -292,6 +292,9 @@ type IstioConfigStore interface {
 	// one with the same scope, the first one seen will be used (later, we should
 	// have validation at submitting time to prevent this scenario from happening)
 	AuthenticationPolicyByDestination(hostname Hostname, port *Port) *Config
+
+	// CustomFilters lists all the custom filters for the given destination hostname and proxy.
+	CustomFilters(hostname string, proxy *Proxy) []Config
 }
 
 const (
