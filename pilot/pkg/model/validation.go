@@ -1791,6 +1791,10 @@ func ValidateServiceRoleBinding(msg proto.Message) error {
 	return errs
 }
 
+func ValidateFilterAugment(msg proto.Message) error {
+	return nil
+}
+
 func validateJwt(jwt *authn.Jwt) (errs error) {
 	if jwt == nil {
 		return nil

@@ -17,29 +17,30 @@ package filter
 import (
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/plugin"
+	"istio.io/istio/pkg/log"
 
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2"
+	pbListener "github.com/envoyproxy/go-control-plane/envoy/api/v2/listener"
 	pbHTTP "github.com/envoyproxy/go-control-plane/envoy/config/filter/network/http_connection_manager/v2"
-	pbGoogle "github.com/gogo/protobuf/types"
+	"istio.io/api/networking/v1alpha3"
 )
 
 type Plugin struct{}
+
+func NewPlugin() plugin.Plugin {
+	return Plugin{}
+}
 
 func (Plugin) OnOutboundListener(in *plugin.InputParams, mutable *plugin.MutableObjects) error {
 	return nil
 }
 
 func (Plugin) OnInboundListener(in *plugin.InputParams, mutable *plugin.MutableObjects) error {
+	filters := getFilters(in, v1alpha3.FilterAugment_INBOUND)
+	log.Infof("OnInboundListener got %d filter augments", len(filters))
 	for _, chain := range mutable.FilterChains {
-		if in.ListenerType == plugin.ListenerTypeHTTP {
-			httpFilters := getHttpFilters(in)
-			for _, f := range httpFilters {
-				f.addToChain(&chain)
-			}
-		}
-		tcpFilters := getTCPFilters(in)
-		for _, f := range tcpFilters {
-			f.addToChain(chain)
+		for _, f := range filters {
+			addFilterToChain(&chain, f)
 		}
 	}
 	return nil
@@ -63,29 +64,131 @@ func (Plugin) OnInboundRouteConfiguration(in *plugin.InputParams, routeConfigura
 	return
 }
 
-type httpFilterConfig struct {
-	Name   string
-	Config pbGoogle.Struct
-}
-
-func newHttpFilterConfig(c *model.Config) httpFilterConfig {
-	fc := httpFilterConfig{}
-	return fc
-}
-
-func getHttpFilters(in *plugin.InputParams) []httpFilterConfig {
-	var out []httpFilterConfig
-	cfgs := in.Env.IstioConfigStore.CustomFilters(in.Service.Hostname, in.Node)
+func getFilters(in *plugin.InputParams, d v1alpha3.FilterAugment_Direction) []*v1alpha3.FilterAugment {
+	var out []*v1alpha3.FilterAugment
+	var hostname model.Hostname
+	if in.Service != nil {
+		// Outbound listeners
+		hostname = in.Service.Hostname
+	} else if in.ServiceInstance != nil && in.ServiceInstance.Service != nil {
+		// Inbound listeners
+		hostname = in.ServiceInstance.Service.Hostname
+	}
+	cfgs := in.Env.IstioConfigStore.FilterAugments(hostname, in.Node)
+	log.Infof("Got %d augments before checking matches", len(cfgs))
 	for _, c := range cfgs {
-		out = append(out, newHttpFilterConfig(c))
+		aug := c.Spec.(*v1alpha3.FilterAugment)
+		log.Infof("Checking FilterAugment %s", aug.String())
+		if filterMatches(aug, in, d) {
+			out = append(out, aug)
+		}
 	}
 	return out
 }
 
-func (f httpFilterConfig) addToChain(chain *plugin.FilterChain) {
+func filterMatches(f *v1alpha3.FilterAugment, in *plugin.InputParams, d v1alpha3.FilterAugment_Direction) bool {
+	return listenerTypeMatch(f.GetListenerTypes(), in.ListenerType) && f.GetDirection() == d
+}
+
+func listenerTypeMatch(lts []v1alpha3.FilterAugment_ListenerType, lt plugin.ListenerType) bool {
+	for _, l := range lts {
+		if convertListenerType(l) == lt {
+			return true
+		}
+	}
+	return false
+}
+
+func convertListenerType(in v1alpha3.FilterAugment_ListenerType) plugin.ListenerType {
+	switch in {
+	case v1alpha3.FilterAugment_HTTP:
+		return plugin.ListenerTypeHTTP
+	case v1alpha3.FilterAugment_TCP:
+		return plugin.ListenerTypeTCP
+	default:
+		return plugin.ListenerTypeUnknown
+	}
+}
+
+func addFilterToChain(chain *plugin.FilterChain, f *v1alpha3.FilterAugment) {
+	switch f.GetFilter().(type) {
+	case *v1alpha3.FilterAugment_HttpFilter:
+		addHTTPFilterToChain(chain, f)
+	case *v1alpha3.FilterAugment_NetworkFilter:
+		addTCPFilterToChain(chain, f)
+	}
+}
+
+func addHTTPFilterToChain(chain *plugin.FilterChain, aug *v1alpha3.FilterAugment) {
+	f := aug.GetHttpFilter()
 	filter := pbHTTP.HttpFilter{
 		Name:   f.Name,
-		Config: &f.Config,
+		Config: f.Config,
 	}
-	chain.HTTP = append(chain.HTTP, &filter)
+	var names []string
+	for _, j := range chain.HTTP {
+		names = append(names, j.Name)
+	}
+	i := insertIndex(names, aug)
+
+	// Insert into new slice.
+	oldFilters := chain.HTTP
+	chain.HTTP = make([]*pbHTTP.HttpFilter, len(oldFilters)+1)
+	for n := 0; n < i; n++ {
+		chain.HTTP[n] = oldFilters[n]
+	}
+	chain.HTTP[i] = &filter
+	for n := i; n < len(oldFilters); n++ {
+		chain.HTTP[n+1] = oldFilters[n]
+	}
+}
+
+func addTCPFilterToChain(chain *plugin.FilterChain, aug *v1alpha3.FilterAugment) {
+	f := aug.GetNetworkFilter()
+	filter := pbListener.Filter{
+		Name:   f.Name,
+		Config: f.Config,
+	}
+	var names []string
+	for _, j := range chain.TCP {
+		names = append(names, j.Name)
+	}
+	i := insertIndex(names, aug)
+
+	// Insert into new slice.
+	oldFilters := chain.TCP
+	chain.TCP = make([]pbListener.Filter, len(oldFilters)+1)
+	for n := 0; n < i; n++ {
+		chain.TCP[n] = oldFilters[n]
+	}
+	chain.TCP[i] = filter
+	for n := i; n < len(oldFilters); n++ {
+		chain.TCP[n+1] = oldFilters[n]
+	}
+}
+
+func insertIndex(names []string, aug *v1alpha3.FilterAugment) int {
+	switch aug.GetOrder().GetPosition() {
+	case v1alpha3.FilterAugment_Order_FIRST:
+		return 0
+	case v1alpha3.FilterAugment_Order_LAST:
+		return len(names)
+	case v1alpha3.FilterAugment_Order_BEFORE:
+		target := aug.GetOrder().GetRelativeTo()
+		for i, n := range names {
+			if n == target {
+				return i
+			}
+		}
+		return len(names)
+	case v1alpha3.FilterAugment_Order_AFTER:
+		target := aug.GetOrder().GetRelativeTo()
+		for i, n := range names {
+			if n == target {
+				return i + 1
+			}
+		}
+		return len(names)
+	}
+	panic("unknown Position")
 }

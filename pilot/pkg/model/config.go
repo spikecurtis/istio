@@ -293,8 +293,8 @@ type IstioConfigStore interface {
 	// have validation at submitting time to prevent this scenario from happening)
 	AuthenticationPolicyByDestination(hostname Hostname, port *Port) *Config
 
-	// CustomFilters lists all the custom filters for the given destination hostname and proxy.
-	CustomFilters(hostname string, proxy *Proxy) []Config
+	// FilterAugments lists all the custom filters for the given destination hostname and proxy.
+	FilterAugments(hostname Hostname, proxy *Proxy) []Config
 }
 
 const (
@@ -505,6 +505,15 @@ var (
 		Validate:    ValidateServiceRoleBinding,
 	}
 
+	FilterAugment = ProtoSchema{
+		Type:        "filter-augment",
+		Plural:      "filter-augments",
+		Group:       "networking",
+		Version:     "v1alpha3",
+		MessageName: "istio.networking.v1alpha3.FilterAugment",
+		Validate:    ValidateFilterAugment,
+	}
+
 	// IstioConfigTypes lists all Istio config types with schemas and validation
 	IstioConfigTypes = ConfigDescriptor{
 		RouteRule,
@@ -522,6 +531,7 @@ var (
 		AuthenticationPolicy,
 		ServiceRole,
 		ServiceRoleBinding,
+		FilterAugment,
 	}
 )
 
@@ -1037,6 +1047,52 @@ func (store *istioConfigStore) AuthenticationPolicyByDestination(hostname Hostna
 		return nil
 	}
 	return &out
+}
+
+func (store *istioConfigStore) FilterAugments(hostname Hostname, proxy *Proxy) []Config {
+	log.Infof("FilterAugments(%s, %v)", hostname, proxy.Type)
+	var out []Config
+	specs, err := store.List(FilterAugment.Type, NamespaceAll)
+	if err != nil {
+		log.Errorf("Error listing FilterAugments %v", err)
+		return out
+	}
+	log.Infof("Got %d FilterAugments from config", len(specs))
+	for _, s := range specs {
+		aug := s.Spec.(*networking.FilterAugment)
+		log.Infof("Store matching FilterAugment %s", aug.String())
+		if hostsMatch(hostname, aug.GetHosts()) && gatewayMatch(proxy, aug.GetGateways()) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func hostsMatch(hostname Hostname, hosts []string) bool {
+	for _, h := range hosts {
+		if hostMatch(hostname, h) {
+			return true
+		}
+	}
+	return false
+}
+
+func hostMatch(hostname Hostname, host string) bool {
+	// TODO: support wildcard match
+	return string(hostname) == host
+}
+
+func gatewayMatch(proxy *Proxy, gateways []string) bool {
+	if len(gateways) == 0 {
+		gateways = []string{"mesh"}
+	}
+	for _, gateway := range gateways {
+		if gateway == "mesh" && proxy.Type == Sidecar {
+			return true
+		}
+		// TODO: support looking up gateways by name
+	}
+	return false
 }
 
 // SortHTTPAPISpec sorts a slice in a stable manner.

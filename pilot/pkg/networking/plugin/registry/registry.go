@@ -20,6 +20,7 @@ package registry
 import (
 	"istio.io/istio/pilot/pkg/networking/plugin"
 	"istio.io/istio/pilot/pkg/networking/plugin/authn"
+	"istio.io/istio/pilot/pkg/networking/plugin/filter"
 	"istio.io/istio/pilot/pkg/networking/plugin/mixer"
 )
 
@@ -27,5 +28,6 @@ import (
 func NewPlugins() []plugin.Plugin {
 	return []plugin.Plugin{
 		authn.NewPlugin(),
-		mixer.NewPlugin()}
+		mixer.NewPlugin(),
+		filter.NewPlugin()}
 }
