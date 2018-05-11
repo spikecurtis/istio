@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/peer"
 
 	"istio.io/istio/pilot/pkg/model"
+	"istio.io/istio/pilot/pkg/networking/util"
 	"istio.io/istio/pkg/log"
 )
 
@@ -119,11 +120,11 @@ func loadAssignment(c *EdsCluster) *xdsapi.ClusterLoadAssignment {
 }
 
 func newEndpoint(e *model.NetworkEndpoint) (*endpoint.LbEndpoint, error) {
-	err := e.ValidateAddress()
+	err := util.ValidateNetworkEndpointAddress(e)
 	if err != nil {
 		return nil, err
 	}
-	addr := e.GetAddress()
+	addr := util.GetNetworkEndpointAddress(e)
 	ep := &endpoint.LbEndpoint{
 		Endpoint: &endpoint.Endpoint{
 			Address: &addr,
