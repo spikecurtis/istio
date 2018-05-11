@@ -36,12 +36,24 @@ func (Plugin) OnOutboundListener(in *plugin.InputParams, mutable *plugin.Mutable
 }
 
 func (Plugin) OnInboundListener(in *plugin.InputParams, mutable *plugin.MutableObjects) error {
-	filters := getFilters(in, v1alpha3.FilterAugment_INBOUND)
-	log.Infof("OnInboundListener got %d filter augments", len(filters))
-	for _, chain := range mutable.FilterChains {
+	filters := getFilters(in, v1alpha3.FilterAugment_Match_INBOUND)
+	log.Infof("FP OnInboundListener got %d filter augments", len(filters))
+	for i := 0; i < len(mutable.FilterChains); i++ {
+		// using a for loop this way instead of range allows us to mutate the chains in place.
+		chain := &mutable.FilterChains[i]
 		for _, f := range filters {
-			addFilterToChain(&chain, f)
+			addFilterToChain(chain, f)
 		}
+		var http []string
+		for _, h := range chain.HTTP {
+			http = append(http, h.Name)
+		}
+		log.Infof("FP chain #%d HTTP filters %v", i, http)
+		var tcp []string
+		for _, t := range chain.TCP {
+			tcp = append(tcp, t.Name)
+		}
+		log.Infof("FP chain #%d TCP filters %v", i, tcp)
 	}
 	return nil
 }
@@ -64,7 +76,7 @@ func (Plugin) OnInboundRouteConfiguration(in *plugin.InputParams, routeConfigura
 	return
 }
 
-func getFilters(in *plugin.InputParams, d v1alpha3.FilterAugment_Direction) []*v1alpha3.FilterAugment {
+func getFilters(in *plugin.InputParams, d v1alpha3.FilterAugment_Match_Direction) []*v1alpha3.FilterAugment {
 	var out []*v1alpha3.FilterAugment
 	var hostname model.Hostname
 	if in.Service != nil {
@@ -75,10 +87,10 @@ func getFilters(in *plugin.InputParams, d v1alpha3.FilterAugment_Direction) []*v
 		hostname = in.ServiceInstance.Service.Hostname
 	}
 	cfgs := in.Env.IstioConfigStore.FilterAugments(hostname, in.Node)
-	log.Infof("Got %d augments before checking matches", len(cfgs))
+	log.Infof("FP Got %d augments before checking matches", len(cfgs))
 	for _, c := range cfgs {
 		aug := c.Spec.(*v1alpha3.FilterAugment)
-		log.Infof("Checking FilterAugment %s", aug.String())
+		log.Infof("FP Checking FilterAugment %s", aug.String())
 		if filterMatches(aug, in, d) {
 			out = append(out, aug)
 		}
@@ -86,11 +98,16 @@ func getFilters(in *plugin.InputParams, d v1alpha3.FilterAugment_Direction) []*v
 	return out
 }
 
-func filterMatches(f *v1alpha3.FilterAugment, in *plugin.InputParams, d v1alpha3.FilterAugment_Direction) bool {
-	return listenerTypeMatch(f.GetListenerTypes(), in.ListenerType) && f.GetDirection() == d
+func filterMatches(f *v1alpha3.FilterAugment, in *plugin.InputParams, d v1alpha3.FilterAugment_Match_Direction) bool {
+	for _, match := range f.GetMatches() {
+		if listenerTypeMatch(match.GetListenerTypes(), in.ListenerType) && directionMatch(match.GetDirections(), d) {
+			return true
+		}
+	}
+	return false
 }
 
-func listenerTypeMatch(lts []v1alpha3.FilterAugment_ListenerType, lt plugin.ListenerType) bool {
+func listenerTypeMatch(lts []v1alpha3.FilterAugment_Match_ListenerType, lt plugin.ListenerType) bool {
 	for _, l := range lts {
 		if convertListenerType(l) == lt {
 			return true
@@ -99,11 +116,20 @@ func listenerTypeMatch(lts []v1alpha3.FilterAugment_ListenerType, lt plugin.List
 	return false
 }
 
-func convertListenerType(in v1alpha3.FilterAugment_ListenerType) plugin.ListenerType {
+func directionMatch(ds []v1alpha3.FilterAugment_Match_Direction, d v1alpha3.FilterAugment_Match_Direction) bool {
+	for _, dir := range ds {
+		if dir == d {
+			return true
+		}
+	}
+	return false
+}
+
+func convertListenerType(in v1alpha3.FilterAugment_Match_ListenerType) plugin.ListenerType {
 	switch in {
-	case v1alpha3.FilterAugment_HTTP:
+	case v1alpha3.FilterAugment_Match_HTTP:
 		return plugin.ListenerTypeHTTP
-	case v1alpha3.FilterAugment_TCP:
+	case v1alpha3.FilterAugment_Match_TCP:
 		return plugin.ListenerTypeTCP
 	default:
 		return plugin.ListenerTypeUnknown
@@ -111,6 +137,7 @@ func convertListenerType(in v1alpha3.FilterAugment_ListenerType) plugin.Listener
 }
 
 func addFilterToChain(chain *plugin.FilterChain, f *v1alpha3.FilterAugment) {
+	log.Infof("FP addFilterToChain")
 	switch f.GetFilter().(type) {
 	case *v1alpha3.FilterAugment_HttpFilter:
 		addHTTPFilterToChain(chain, f)
@@ -121,9 +148,10 @@ func addFilterToChain(chain *plugin.FilterChain, f *v1alpha3.FilterAugment) {
 
 func addHTTPFilterToChain(chain *plugin.FilterChain, aug *v1alpha3.FilterAugment) {
 	f := aug.GetHttpFilter()
+	log.Infof("FP addHTTPFilterToChain %s", f.GetName())
 	filter := pbHTTP.HttpFilter{
-		Name:   f.Name,
-		Config: f.Config,
+		Name:   f.GetName(),
+		Config: f.GetConfig(),
 	}
 	var names []string
 	for _, j := range chain.HTTP {
@@ -145,9 +173,10 @@ func addHTTPFilterToChain(chain *plugin.FilterChain, aug *v1alpha3.FilterAugment
 
 func addTCPFilterToChain(chain *plugin.FilterChain, aug *v1alpha3.FilterAugment) {
 	f := aug.GetNetworkFilter()
+	log.Infof("FP addTCPFilterToChain %s", f.GetName())
 	filter := pbListener.Filter{
-		Name:   f.Name,
-		Config: f.Config,
+		Name:   f.GetName(),
+		Config: f.GetConfig(),
 	}
 	var names []string
 	for _, j := range chain.TCP {

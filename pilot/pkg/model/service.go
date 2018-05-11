@@ -24,18 +24,12 @@ package model
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"net"
-	"path"
 	"sort"
 	"strings"
 
-	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
-
 	authn "istio.io/api/authentication/v1alpha1"
 	meshconfig "istio.io/api/mesh/v1alpha1"
-	"istio.io/istio/pilot/pkg/networking/util"
 )
 
 // Hostname describes a (possibly wildcarded) hostname
@@ -705,38 +699,4 @@ func (s Service) GetServiceAddressForProxy(node *Proxy) string {
 		return s.Addresses[node.ClusterID]
 	}
 	return s.Address
-}
-
-// GetAddress returns an Envoy v2 API `Address` that represents this NetworkEndpoint
-func (n *NetworkEndpoint) GetAddress() core.Address {
-	switch n.Family {
-	case AddressFamilyTCP:
-		return util.BuildAddress(n.Address, uint32(n.Port))
-	case AddressFamilyUnix:
-		return util.BuildPipeAddress(n.Address)
-	default:
-		panic(fmt.Sprintf("unhandled Family %v", n.Family))
-	}
-}
-
-// ValidateAddress checks the Address field of a NetworkEndpoint. If the family is TCP, it checks the address is a valid
-// IP address. If the family is Unix, it checks the address is a valid socket file path.
-func (n *NetworkEndpoint) ValidateAddress() error {
-	switch n.Family {
-	case AddressFamilyTCP:
-		ipAddr := net.ParseIP(n.Address)
-		if ipAddr == nil {
-			return errors.New("invalid IP address " + n.Address)
-		}
-	case AddressFamilyUnix:
-		if len(n.Address) == 0 {
-			return errors.New("unix address must not be empty")
-		}
-		if !path.IsAbs(n.Address) {
-			return errors.New("unix address must be absolute path: " + n.Address)
-		}
-	default:
-		panic(fmt.Sprintf("unhandled Family %v", n.Family))
-	}
-	return nil
 }

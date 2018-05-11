@@ -370,7 +370,6 @@ func udsRequest(server *bootstrap.Server, t *testing.T) {
 	if path != udsPath {
 		t.Fatalf("expected Pipe to %s, got %s", udsPath, path)
 	}
-	return
 }
 
 func TestEds(t *testing.T) {

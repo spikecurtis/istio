@@ -1061,14 +1061,23 @@ func (store *istioConfigStore) FilterAugments(hostname Hostname, proxy *Proxy) [
 	for _, s := range specs {
 		aug := s.Spec.(*networking.FilterAugment)
 		log.Infof("Store matching FilterAugment %s", aug.String())
-		if hostsMatch(hostname, aug.GetHosts()) && gatewayMatch(proxy, aug.GetGateways()) {
-			out = append(out, s)
+		for _, match := range aug.GetMatches() {
+			if filterAugmentMatch(match, hostname, proxy) {
+				out = append(out, s)
+			}
 		}
 	}
 	return out
 }
 
+func filterAugmentMatch(match *networking.FilterAugment_Match, hostname Hostname, proxy *Proxy) bool {
+	return hostsMatch(hostname, match.GetHosts()) && gatewayMatch(proxy, match.GetGateways())
+}
+
 func hostsMatch(hostname Hostname, hosts []string) bool {
+	if len(hosts) == 0 {
+		return true
+	}
 	for _, h := range hosts {
 		if hostMatch(hostname, h) {
 			return true
@@ -1084,7 +1093,7 @@ func hostMatch(hostname Hostname, host string) bool {
 
 func gatewayMatch(proxy *Proxy, gateways []string) bool {
 	if len(gateways) == 0 {
-		gateways = []string{"mesh"}
+		return true
 	}
 	for _, gateway := range gateways {
 		if gateway == "mesh" && proxy.Type == Sidecar {

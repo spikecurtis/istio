@@ -15,6 +15,10 @@
 package util
 
 import (
+	"errors"
+	"fmt"
+	"net"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +31,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/gogo/protobuf/types"
 
+	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/log"
 )
 
@@ -104,6 +109,40 @@ func BuildAddress(ip string, port uint32) core.Address {
 // BuildPipeAddress returns a Pipe address with the given path.
 func BuildPipeAddress(path string) core.Address {
 	return core.Address{Address: &core.Address_Pipe{Pipe: &core.Pipe{Path: path}}}
+}
+
+// GetNetworkEndpointAddress returns an Envoy v2 API `Address` that represents this NetworkEndpoint
+func GetNetworkEndpointAddress(n *model.NetworkEndpoint) core.Address {
+	switch n.Family {
+	case model.AddressFamilyTCP:
+		return BuildAddress(n.Address, uint32(n.Port))
+	case model.AddressFamilyUnix:
+		return BuildPipeAddress(n.Address)
+	default:
+		panic(fmt.Sprintf("unhandled Family %v", n.Family))
+	}
+}
+
+// ValidateNetworkEndpointAddress checks the Address field of a NetworkEndpoint. If the family is TCP, it checks the
+// address is a valid IP address. If the family is Unix, it checks the address is a valid socket file path.
+func ValidateNetworkEndpointAddress(n *model.NetworkEndpoint) error {
+	switch n.Family {
+	case model.AddressFamilyTCP:
+		ipAddr := net.ParseIP(n.Address)
+		if ipAddr == nil {
+			return errors.New("invalid IP address " + n.Address)
+		}
+	case model.AddressFamilyUnix:
+		if len(n.Address) == 0 {
+			return errors.New("unix address must not be empty")
+		}
+		if !path.IsAbs(n.Address) {
+			return errors.New("unix address must be absolute path: " + n.Address)
+		}
+	default:
+		panic(fmt.Sprintf("unhandled Family %v", n.Family))
+	}
+	return nil
 }
 
 // GetByAddress returns a listener by its address
